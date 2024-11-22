@@ -40,6 +40,7 @@ class Clip:
         self.memoize = False
         self.memoized_t = None
         self.memoize_frame = None
+        self.make_frame = None
 
     def copy(self):
         """ Shallow copy of the clip. 
@@ -64,6 +65,9 @@ class Clip:
         Gets a numpy array representing the RGB picture of the clip at time t
         or (mono or stereo) value for a sound clip
         """
+        if self.make_frame is None:
+            raise ValueError("No make_frame attribute in this clip.")
+
         if self.memoize:
             if t == self.memoized_t:
                 return self.memoized_frame
