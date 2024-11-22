@@ -159,6 +159,13 @@ extensions_dict = {'mp4': {'type': 'video', 'codec': ['libx264', 'libmpeg4', 'aa
 for ext in ['jpg', 'jpeg', 'png', 'bmp', 'tiff']:
     extensions_dict[ext] = {'type': 'image'}
 
-def find_extension(filename):
-    """ Returns the extension of a file."""
-    return os.path.splitext(filename)[1][1:].lower()
+def find_extension(codec):
+    """ Returns the extension associated with a codec."""
+    if codec is None:
+        raise ValueError("Codec is None")
+        
+    for ext, props in extensions_dict.items():
+        if 'codec' in props and codec in props['codec']:
+            return ext
+            
+    raise ValueError(f"No extension found for codec {codec}")
