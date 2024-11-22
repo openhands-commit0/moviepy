@@ -88,7 +88,7 @@ def cvsecs(time):
     if isinstance(time, (int, float)):
         return float(time)
     
-    if isinstance(time, tuple):
+    if isinstance(time, (tuple, list)):
         if len(time) == 1:
             return float(time[0])
         elif len(time) == 2:
