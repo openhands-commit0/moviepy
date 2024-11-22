@@ -2,6 +2,16 @@ import os
 import subprocess as sp
 from .compat import DEVNULL
 from .config_defaults import FFMPEG_BINARY, IMAGEMAGICK_BINARY
+
+def try_cmd(cmd):
+    """Try to execute a command and return (success, stderr output)."""
+    try:
+        process = sp.Popen(cmd, stdout=DEVNULL, stderr=sp.PIPE)
+        _, error = process.communicate()
+        success = process.returncode == 0
+        return success, error
+    except Exception as e:
+        return False, str(e)
 if os.name == 'nt':
     try:
         import winreg as wr
@@ -44,11 +54,30 @@ else:
 
 def get_setting(varname):
     """ Returns the value of a configuration variable. """
-    pass
+    if varname == "FFMPEG_BINARY":
+        return FFMPEG_BINARY
+    elif varname == "IMAGEMAGICK_BINARY":
+        return IMAGEMAGICK_BINARY
+    else:
+        raise ValueError(f"Unknown setting {varname}")
 
 def change_settings(new_settings=None, filename=None):
     """ Changes the value of configuration variables."""
-    pass
+    global FFMPEG_BINARY, IMAGEMAGICK_BINARY
+    
+    if new_settings is None:
+        new_settings = {}
+    
+    if filename is not None:
+        # Load settings from file
+        with open(filename) as f:
+            exec(f.read(), globals())
+    
+    # Update with new settings
+    if "FFMPEG_BINARY" in new_settings:
+        FFMPEG_BINARY = new_settings["FFMPEG_BINARY"]
+    if "IMAGEMAGICK_BINARY" in new_settings:
+        IMAGEMAGICK_BINARY = new_settings["IMAGEMAGICK_BINARY"]
 if __name__ == '__main__':
     if try_cmd([FFMPEG_BINARY])[0]:
         print('MoviePy : ffmpeg successfully found.')

@@ -769,6 +769,7 @@ class ImageClip(VideoClip):
         VideoClip.__init__(self, ismask=ismask, duration=duration)
         if isinstance(img, string_types):
             img = imread(img)
+            
         if len(img.shape) == 3:
             if img.shape[2] == 4:
                 if fromalpha:
@@ -778,7 +779,26 @@ class ImageClip(VideoClip):
                 elif transparent:
                     self.mask = ImageClip(1.0 * img[:, :, 3] / 255, ismask=True)
                     img = img[:, :, :3]
-            elif ismask:
+            elif ismask and img.shape[2] == 3:
+                img = img.mean(axis=2)
+                
+        # Convert to float
+        if img.dtype != 'float':
+            img = 1.0 * img / 255
+            
+        # Save the image and its size
+        self.img = img
+        self.size = self.img.shape[:2][::-1]
+        self.w, self.h = self.size
+        
+        # Generate a mask if required
+        if not ismask and transparent:
+            self.mask = ImageClip(np.ones(self.size[::-1]), ismask=True)
+            
+        def make_frame(t):
+            return self.img
+            
+        self.make_frame = make_frame
                 img = 1.0 * img[:, :, 0] / 255
         self.make_frame = lambda t: img
         self.size = img.shape[:2][::-1]
