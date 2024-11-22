@@ -95,7 +95,13 @@ class VideoClip(Clip):
         the alpha layer of the picture (only works with PNGs).
 
         """
-        pass
+        im = self.get_frame(t)
+        if withmask and self.mask is not None:
+            mask = 255 * self.mask.get_frame(t)
+            im = np.dstack([im, mask]).astype('uint8')
+        else:
+            im = im.astype("uint8")
+        imsave(filename, im)
 
     @requires_duration
     @use_clip_fps_by_default
@@ -212,7 +218,48 @@ class VideoClip(Clip):
         >>> clip.close()
 
         """
-        pass
+        if codec is None:
+            name, ext = os.path.splitext(filename)
+            try:
+                codec = extensions_dict[ext[1:]]['codec'][0]
+            except:
+                raise ValueError("MoviePy couldn't find the codec associated "
+                               "with the filename. Provide the 'codec' "
+                               "parameter in write_videofile.")
+
+        if audio_codec is None:
+            if codec == 'libx264':
+                audio_codec = 'aac'
+            elif codec == 'libvpx':
+                audio_codec = 'libvorbis'
+            else:
+                audio_codec = 'libmp3lame'
+
+        if audio is True:
+            audio = self.audio
+
+        if audio is not None:
+            if temp_audiofile is None:
+                temp_audiofile = os.path.splitext(filename)[0] + '_temp_audio.m4a'
+
+            if not rewrite_audio and os.path.exists(temp_audiofile):
+                logger.info("Reusing existing audio file: %s" % temp_audiofile)
+            else:
+                logger.info("Writing audio in %s" % temp_audiofile)
+                audio.write_audiofile(temp_audiofile, audio_fps, audio_nbytes,
+                                    audio_bufsize, audio_codec, audio_bitrate,
+                                    write_logfile=write_logfile, verbose=verbose)
+
+        logger.info("Writing video in %s" % filename)
+
+        ffmpeg_write_video(self, filename, fps, codec, bitrate, preset,
+                          write_logfile=write_logfile, audiofile=temp_audiofile,
+                          verbose=verbose, threads=threads,
+                          ffmpeg_params=ffmpeg_params, logger=logger)
+
+        if remove_temp and audio is not None:
+            if os.path.exists(temp_audiofile):
+                os.remove(temp_audiofile)
 
     @requires_duration
     @use_clip_fps_by_default
@@ -257,7 +304,31 @@ class VideoClip(Clip):
         ``ImageSequenceClip``.
 
         """
-        pass
+        logger = proglog.default_bar_logger(logger)
+        
+        # Create output directory if it doesn't exist
+        output_dir = os.path.dirname(nameformat)
+        if output_dir and not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+            
+        # Get total number of frames
+        total_frames = int(self.duration * fps)
+        times = np.linspace(0, self.duration, total_frames + 1)[:-1]
+        
+        # Initialize list to store filenames
+        filenames = []
+        
+        logger.new_bar_segment(total_frames)
+        
+        for i, t in enumerate(times):
+            name = nameformat % i
+            filenames.append(name)
+            self.save_frame(name, t, withmask=withmask)
+            logger.bar_update(i)
+            
+        logger.bar_close()
+        
+        return filenames
 
     @requires_duration
     @convert_masks_to_RGB
@@ -312,7 +383,23 @@ class VideoClip(Clip):
             >>> myClip.speedx(0.5).to_gif('myClip.gif')
 
         """
-        pass
+        if fps is None:
+            fps = self.fps
+
+        if fps is None:
+            raise ValueError("No fps attribute specified")
+
+        if program == 'imageio':
+            write_gif_with_image_io(self, filename, fps=fps, opt=opt, loop=loop,
+                                  verbose=verbose, colors=colors, logger=logger)
+        elif tempfiles:
+            write_gif_with_tempfiles(self, filename, fps=fps, program=program,
+                                   opt=opt, fuzz=fuzz, verbose=verbose,
+                                   dispose=dispose, colors=colors, logger=logger)
+        else:
+            write_gif(self, filename, fps=fps, program=program, opt=opt,
+                     fuzz=fuzz, verbose=verbose, dispose=dispose,
+                     colors=colors, logger=logger)
 
     def subfx(self, fx, ta=0, tb=None, **kwargs):
         """Apply a transformation to a part of the clip.
@@ -329,14 +416,26 @@ class VideoClip(Clip):
         >>> newclip = clip.subapply(lambda c:c.speedx(0.5) , 3,6)
 
         """
-        pass
+        left = None if ta == 0 else self.subclip(0, ta)
+        center = self.subclip(ta, tb).fx(fx, **kwargs)
+        right = None if tb is None else self.subclip(tb, self.duration)
+
+        clips = [c for c in [left, center, right] if c is not None]
+
+        # If there's only one clip (like when ta=0, tb=None), just return it
+        if len(clips) == 1:
+            return clips[0]
+
+        # Concatenate the clips
+        from moviepy.video.compositing.concatenate import concatenate_videoclips
+        return concatenate_videoclips(clips)
 
     def fl_image(self, image_func, apply_to=None):
         """
         Modifies the images of a clip by replacing the frame
         `get_frame(t)` by another frame,  `image_func(get_frame(t))`
         """
-        pass
+        return self.fl(lambda gf, t: image_func(gf(t)), apply_to=apply_to)
 
     def blit_on(self, picture, t):
         """
@@ -344,7 +443,35 @@ class VideoClip(Clip):
         on the given `picture`, the position of the clip being given
         by the clip's ``pos`` attribute. Meant for compositing.
         """
-        pass
+        hf, wf = framesize = picture.shape[:2]
+        
+        if self.ismask and picture.max() != 0:
+            return np.minimum(1, picture + self.blit_on(np.zeros(framesize), t))
+            
+        picture = picture.copy()
+        
+        # Get the current frame
+        img = self.get_frame(t)
+        mask = None
+        if self.mask is not None:
+            mask = self.mask.get_frame(t)
+            
+        hi, wi = img.shape[:2]
+        
+        # Get position of clip
+        pos = self.pos(t)
+        
+        # Convert relative position to absolute position
+        if self.relative_pos:
+            pos = (pos[0] * wf, pos[1] * hf)
+            
+        # Compute coordinates of clip in the final picture
+        xt, yt = int(pos[0]), int(pos[1])
+        
+        # Blit the clip onto the picture
+        blit(img, picture, xt, yt, mask=mask)
+        
+        return picture
 
     def add_mask(self):
         """Add a mask VideoClip to the VideoClip.
@@ -356,7 +483,13 @@ class VideoClip(Clip):
         Set ``constant_size`` to  `False` for clips with moving
         image size.
         """
-        pass
+        if self.has_constant_size:
+            mask = ColorClip(self.size, 1.0, ismask=True)
+            return self.set_mask(mask.set_duration(self.duration))
+        else:
+            make_frame = lambda t: np.ones(self.get_frame(t).shape[:2], dtype=float)
+            mask = VideoClip(make_frame, ismask=True)
+            return self.set_mask(mask.set_duration(self.duration))
 
     def on_color(self, size=None, color=(0, 0, 0), pos=None, col_opacity=None):
         """Place the clip on a colored background.
@@ -383,7 +516,29 @@ class VideoClip(Clip):
           background.
 
         """
-        pass
+        from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
+        
+        if size is None:
+            size = self.size
+            
+        if pos is None:
+            pos = 'center'
+            
+        colorclip = ColorClip(size, color)
+        
+        if col_opacity is not None:
+            colorclip = colorclip.set_opacity(col_opacity)
+            
+        if self.duration is not None:
+            colorclip = colorclip.set_duration(self.duration)
+            
+        result = CompositeVideoClip([colorclip, self.set_position(pos)],
+                                  transparent=(col_opacity is not None))
+                                  
+        if self.mask is not None:
+            return result.set_mask(self.mask)
+            
+        return result
 
     @outplace
     def set_make_frame(self, mf):
@@ -392,7 +547,9 @@ class VideoClip(Clip):
         Returns a copy of the VideoClip instance, with the make_frame
         attribute set to `mf`.
         """
-        pass
+        self.make_frame = mf
+        if hasattr(self, 'size'):
+            del self.size
 
     @outplace
     def set_audio(self, audioclip):
@@ -401,7 +558,7 @@ class VideoClip(Clip):
         Returns a copy of the VideoClip instance, with the `audio`
         attribute set to ``audio``, which must be an AudioClip instance.
         """
-        pass
+        self.audio = audioclip
 
     @outplace
     def set_mask(self, mask):
@@ -409,7 +566,7 @@ class VideoClip(Clip):
 
         Returns a copy of the VideoClip with the mask attribute set to
         ``mask``, which must be a greyscale (values in 0-1) VideoClip"""
-        pass
+        self.mask = mask
 
     @add_mask_if_none
     @outplace
@@ -419,7 +576,7 @@ class VideoClip(Clip):
         Returns a semi-transparent copy of the clip where the mask is
         multiplied by ``op`` (any float, normally between 0 and 1).
         """
-        pass
+        self.mask = self.mask.fl_image(lambda pic: op * pic)
 
     @apply_to_mask
     @outplace
@@ -447,7 +604,12 @@ class VideoClip(Clip):
         >>> clip.set_position(lambda t: ('center', 50+t) )
 
         """
-        pass
+        self.relative_pos = relative
+        
+        if hasattr(pos, '__call__'):
+            self.pos = pos
+        else:
+            self.pos = lambda t: pos
 
     @convert_to_seconds(['t'])
     def to_ImageClip(self, t=0, with_mask=True, duration=None):
@@ -456,15 +618,30 @@ class VideoClip(Clip):
         which can be expressed in seconds (15.35), in (min, sec),
         in (hour, min, sec), or as a string: '01:03:05.35'.
         """
-        pass
+        newclip = ImageClip(self.get_frame(t), ismask=self.ismask)
+        if with_mask and self.mask is not None:
+            newclip.mask = ImageClip(self.mask.get_frame(t), ismask=True)
+        if duration is not None:
+            newclip.duration = duration
+        return newclip
 
     def to_mask(self, canal=0):
         """Return a mask a video clip made from the clip."""
-        pass
+        if self.ismask:
+            return self
+        else:
+            newclip = self.fl_image(lambda pic: 1.0 * pic[:, :, canal] / 255)
+            newclip.ismask = True
+            return newclip
 
     def to_RGB(self):
         """Return a non-mask video clip made from the mask video clip."""
-        pass
+        if self.ismask:
+            newclip = self.fl_image(lambda pic: np.dstack(3 * [255 * pic]))
+            newclip.ismask = False
+            return newclip
+        else:
+            return self
 
     @outplace
     def without_audio(self):
@@ -473,7 +650,7 @@ class VideoClip(Clip):
         Return a copy of the clip with audio set to None.
 
         """
-        pass
+        self.audio = None
 
     @outplace
     def afx(self, fun, *a, **k):
@@ -482,7 +659,7 @@ class VideoClip(Clip):
         Return a new clip whose audio has been transformed by ``fun``.
 
         """
-        pass
+        self.audio = fun(self.audio, *a, **k)
 
 class DataVideoClip(VideoClip):
     """
