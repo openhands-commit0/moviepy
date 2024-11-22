@@ -10,23 +10,51 @@ from .compat import DEVNULL
 
 def sys_write_flush(s):
     """ Writes and flushes without delay a text in the console """
-    pass
+    sys.stdout.write(s)
+    sys.stdout.flush()
 
 def verbose_print(verbose, s):
     """ Only prints s (with sys_write_flush) if verbose is True."""
-    pass
+    if verbose:
+        sys_write_flush(s)
 
 def subprocess_call(cmd, logger='bar', errorprint=True):
     """ Executes the given subprocess command.
     
     Set logger to None or a custom Proglog logger to avoid printings.
     """
-    pass
+    if logger == 'bar':
+        logger = proglog.default_bar_logger('bar')
+    
+    try:
+        popen_params = {
+            "stdout": DEVNULL,
+            "stderr": sp.PIPE,
+            "stdin": DEVNULL
+        }
+        
+        proc = sp.Popen(cmd, **popen_params)
+        
+        out, err = proc.communicate()
+        
+        if proc.returncode:
+            if errorprint and err is not None:
+                sys_write_flush(err.decode('utf8'))
+            raise IOError(err.decode('utf8'))
+        
+        return proc
+    except Exception as e:
+        if errorprint:
+            sys_write_flush("Moviepy Error: failed command:\n%s\n" % ' '.join(cmd))
+        raise IOError("Moviepy Error: failed command:\n%s\n" % ' '.join(cmd))
 
 def is_string(obj):
     """ Returns true if s is string or string-like object,
     compatible with Python 2 and Python 3."""
-    pass
+    try:
+        return isinstance(obj, str)
+    except Exception:
+        return False
 
 def cvsecs(time):
     """ Will convert any time into seconds. 
@@ -51,7 +79,36 @@ def cvsecs(time):
     >>> cvsecs('33.5')      # only secs
     33.5
     """
-    pass
+    if isinstance(time, (int, float)):
+        return float(time)
+    
+    if isinstance(time, tuple):
+        if len(time) == 1:
+            return float(time[0])
+        elif len(time) == 2:
+            return float(time[0] * 60 + time[1])
+        elif len(time) == 3:
+            return float(time[0] * 3600 + time[1] * 60 + time[2])
+    
+    if isinstance(time, str):
+        # Handle comma as decimal separator
+        time = time.replace(',', '.')
+        
+        if ':' not in time:
+            # Just seconds
+            return float(time)
+        
+        parts = time.split(':')
+        parts = [float(p) for p in parts]
+        
+        if len(parts) == 2:
+            # Minutes and seconds
+            return parts[0] * 60 + parts[1]
+        elif len(parts) == 3:
+            # Hours, minutes and seconds
+            return parts[0] * 3600 + parts[1] * 60 + parts[2]
+    
+    return time
 
 def deprecated_version_of(f, oldname, newname=None):
     """ Indicates that a function is deprecated and has a new name.
@@ -78,7 +135,24 @@ def deprecated_version_of(f, oldname, newname=None):
     >>>
     >>> Clip.to_file = deprecated_version_of(Clip.write_file, 'to_file')
     """
-    pass
+    if newname is None:
+        newname = f.__name__
+
+    warning = ("The function ``%s`` is deprecated and is kept temporarily "
+              "for backwards compatibility.\nPlease use the new name "
+              "``%s`` instead.") % (oldname, newname)
+
+    def deprecated(*args, **kwargs):
+        warnings.warn("MoviePy: " + warning, PendingDeprecationWarning)
+        return f(*args, **kwargs)
+
+    deprecated.__doc__ = warning
+
+    return deprecated
 extensions_dict = {'mp4': {'type': 'video', 'codec': ['libx264', 'libmpeg4', 'aac']}, 'ogv': {'type': 'video', 'codec': ['libtheora']}, 'webm': {'type': 'video', 'codec': ['libvpx']}, 'avi': {'type': 'video'}, 'mov': {'type': 'video'}, 'ogg': {'type': 'audio', 'codec': ['libvorbis']}, 'mp3': {'type': 'audio', 'codec': ['libmp3lame']}, 'wav': {'type': 'audio', 'codec': ['pcm_s16le', 'pcm_s24le', 'pcm_s32le']}, 'm4a': {'type': 'audio', 'codec': ['libfdk_aac']}}
 for ext in ['jpg', 'jpeg', 'png', 'bmp', 'tiff']:
     extensions_dict[ext] = {'type': 'image'}
+
+def find_extension(filename):
+    """ Returns the extension of a file."""
+    return os.path.splitext(filename)[1][1:].lower()
