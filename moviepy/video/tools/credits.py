@@ -68,4 +68,89 @@ def credits1(creditfile, width, stretch=30, color='white', stroke_color='black',
                 Music Supervisor    JEAN DIDIER
               
     """
-    pass
+    # Parse the credit file
+    with open(creditfile) as f:
+        lines = f.readlines()
+
+    # Initialize variables
+    texts = []
+    current_job = None
+    current_names = []
+    total_height = 0
+    max_job_width = 0
+    max_name_width = 0
+
+    # Process each line
+    for line in lines:
+        line = line.strip()
+        
+        # Skip comments
+        if line.startswith('#'):
+            continue
+            
+        # Handle blank lines
+        if line.startswith('.blank'):
+            try:
+                n_blanks = int(line.split()[1])
+                total_height += n_blanks * fontsize
+            except:
+                total_height += fontsize
+            continue
+            
+        # Handle job titles
+        if line.startswith('..'):
+            # Save previous job if exists
+            if current_job is not None:
+                job_clip = TextClip(current_job, font=font, fontsize=fontsize, color=color,
+                                  stroke_color=stroke_color, stroke_width=stroke_width)
+                max_job_width = max(max_job_width, job_clip.w)
+                
+                for name in current_names:
+                    name_clip = TextClip(name, font=font, fontsize=fontsize, color=color,
+                                       stroke_color=stroke_color, stroke_width=stroke_width)
+                    max_name_width = max(max_name_width, name_clip.w)
+                    texts.append((current_job, name))
+                    total_height += fontsize
+                
+            current_job = line[2:]
+            current_names = []
+            continue
+            
+        # Handle names
+        if current_job is not None and line:
+            current_names.append(line)
+            
+    # Add last job if exists
+    if current_job is not None:
+        job_clip = TextClip(current_job, font=font, fontsize=fontsize, color=color,
+                           stroke_color=stroke_color, stroke_width=stroke_width)
+        max_job_width = max(max_job_width, job_clip.w)
+        
+        for name in current_names:
+            name_clip = TextClip(name, font=font, fontsize=fontsize, color=color,
+                               stroke_color=stroke_color, stroke_width=stroke_width)
+            max_name_width = max(max_name_width, name_clip.w)
+            texts.append((current_job, name))
+            total_height += fontsize
+            
+    # Create clips for each text pair
+    clips = []
+    y = 0
+    
+    for job, name in texts:
+        # Create job clip
+        job_clip = TextClip(job, font=font, fontsize=fontsize, color=color,
+                           stroke_color=stroke_color, stroke_width=stroke_width)
+        job_clip = job_clip.set_position(('right', y))
+        
+        # Create name clip
+        name_clip = TextClip(name, font=font, fontsize=fontsize, color=color,
+                            stroke_color=stroke_color, stroke_width=stroke_width)
+        name_clip = name_clip.set_position((job_clip.w + gap, y))
+        
+        clips.extend([job_clip, name_clip])
+        y += fontsize
+        
+    # Create final composite
+    final_clip = CompositeVideoClip(clips, size=(width, total_height))
+    return final_clip
