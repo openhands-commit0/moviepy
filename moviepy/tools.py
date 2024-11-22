@@ -10,7 +10,10 @@ from .compat import DEVNULL
 
 def sys_write_flush(s):
     """ Writes and flushes without delay a text in the console """
-    sys.stdout.write(s)
+    if isinstance(s, bytes):
+        sys.stdout.buffer.write(s)
+    else:
+        sys.stdout.write(s)
     sys.stdout.flush()
 
 def verbose_print(verbose, s):
@@ -79,6 +82,9 @@ def cvsecs(time):
     >>> cvsecs('33.5')      # only secs
     33.5
     """
+    if time is None:
+        return None
+        
     if isinstance(time, (int, float)):
         return float(time)
     
@@ -86,9 +92,9 @@ def cvsecs(time):
         if len(time) == 1:
             return float(time[0])
         elif len(time) == 2:
-            return float(time[0] * 60 + time[1])
+            return float(time[0]) * 60 + float(time[1])
         elif len(time) == 3:
-            return float(time[0] * 3600 + time[1] * 60 + time[2])
+            return float(time[0]) * 3600 + float(time[1]) * 60 + float(time[2])
     
     if isinstance(time, str):
         # Handle comma as decimal separator
